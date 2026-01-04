@@ -86,10 +86,9 @@ if uploaded_file is not None:
         ).astype(int)
 
         # ----------------------------------------------------
-        # FINAL OUTPUT COLUMNS (NO EXTRA GARBAGE)
+        # FINAL OUTPUT
         # ----------------------------------------------------
-        output_cols = list(df.columns)
-        result_df = df[output_cols]
+        result_df = df.copy()
 
         st.success("✅ Purchase Order Calculated Successfully")
         st.dataframe(result_df, use_container_width=True)
