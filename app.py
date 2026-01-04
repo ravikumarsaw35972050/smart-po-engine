@@ -94,10 +94,21 @@ if uploaded_file is not None:
         st.dataframe(result_df, use_container_width=True)
 
         # ----------------------------------------------------
-        # EXCEL DOWNLOAD (STREAMLIT CLOUD SAFE)
+        # SANITIZE BEFORE EXPORT
+        # ----------------------------------------------------
+        safe_df = result_df.copy()
+        safe_df = safe_df.fillna("")  # replace NaN/None with empty string
+
+        # Drop any binary/image-like columns
+        for col in safe_df.columns:
+            if safe_df[col].apply(lambda x: isinstance(x, (bytes, bytearray))).any():
+                safe_df.drop(columns=[col], inplace=True)
+
+        # ----------------------------------------------------
+        # EXCEL DOWNLOAD
         # ----------------------------------------------------
         output = BytesIO()
-        result_df.to_excel(output, index=False, engine="openpyxl")
+        safe_df.to_excel(output, index=False, engine="openpyxl")
         output.seek(0)
 
         st.download_button(
@@ -109,7 +120,8 @@ if uploaded_file is not None:
 
     except Exception as e:
         st.error("❌ Error while processing file")
-        st.exception(e)
+        st.text(f"Error type: {type(e).__name__}")
+        st.text(f"Error message: {str(e)}")
 
 else:
     st.info("👆 Please upload an Excel file to start")
