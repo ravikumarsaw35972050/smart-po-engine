@@ -20,7 +20,7 @@ st.set_page_config(
 st.title("📦 Smart Purchase Order Engine")
 
 # ---------------------------------------------------------
-# SIDEBAR – CONFIGURATION
+# SIDEBAR – CONFIGURATION (WEIGHTS)
 # ---------------------------------------------------------
 st.sidebar.header("⚙️ Configuration")
 
@@ -32,167 +32,152 @@ w45 = st.sidebar.slider("45 Days Weight", 0.0, 1.0, 0.12, 0.01)
 w60 = st.sidebar.slider("60 Days Weight", 0.0, 1.0, 0.08, 0.01)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Weighted Average (Exclude 7 Days)")
-ew15 = st.sidebar.slider("15 Days Weight (Ex)", 0.0, 1.0, 0.40, 0.01)
-ew30 = st.sidebar.slider("30 Days Weight (Ex)", 0.0, 1.0, 0.30, 0.01)
-ew45 = st.sidebar.slider("45 Days Weight (Ex)", 0.0, 1.0, 0.20, 0.01)
-ew60 = st.sidebar.slider("60 Days Weight (Ex)", 0.0, 1.0, 0.10, 0.01)
+st.sidebar.info("💡 Adjust weights to control sales trend sensitivity")
 
 # ---------------------------------------------------------
 # FILE UPLOAD
 # ---------------------------------------------------------
 uploaded_file = st.file_uploader(
     "📤 Upload Excel File",
-    type=["xlsx"],
-    help="Upload Order Sheet Excel (.xlsx)"
+    type=["xlsx"]
 )
 
+if uploaded_file is None:
+    st.stop()
+
 # ---------------------------------------------------------
-# HELPER FUNCTION
+# READ EXCEL
+# ---------------------------------------------------------
+df = pd.read_excel(uploaded_file)
+df.columns = df.columns.str.strip()
+
+# ---------------------------------------------------------
+# SAFE NUMERIC FUNCTION
 # ---------------------------------------------------------
 def num(series, default=0):
     return pd.to_numeric(series, errors="coerce").fillna(default)
 
 # ---------------------------------------------------------
-# CORE LOGIC FUNCTION
+# REQUIRED COLUMNS (SAFE LOAD)
 # ---------------------------------------------------------
-def calculate_po(df):
+sales_cols = [
+    "7 Days Sales",
+    "15 Days Sales",
+    "30 Days Sales",
+    "45 Days Sales",
+    "60 Days Sales"
+]
 
-    # Required columns mapping
-    sales_cols = {
-        "7 Days Sales": 7,
-        "15 Days Sales": 15,
-        "30 Days Sales": 30,
-        "45 Days Sales": 45,
-        "60 Days Sales": 60,
-    }
+for c in sales_cols:
+    if c not in df.columns:
+        df[c] = 0
+    df[c] = num(df[c])
 
-    # Safe numeric conversions
-    for col in sales_cols:
-        if col not in df.columns:
-            df[col] = 0
-        df[col] = num(df[col])
+df["Box Qty"] = num(df.get("Box Qty", 0))
+df["Current Stock"] = num(df.get("Current Stock", 0))
+df["Hold & Unbilled Stock"] = num(df.get("Hold & Unbilled Stock", 0))
+df["TOTAL_STOCK"] = df["Current Stock"] + df["Hold & Unbilled Stock"]
 
-    df["Box Qty"] = num(df.get("Box Qty", 0))
-    df["Current Stock"] = num(df.get("Current Stock", 0))
-    df["Hold & Unbilled Stock"] = num(df.get("Hold & Unbilled Stock", 0))
-    df["TOTAL_STOCK"] = df["Current Stock"] + df["Hold & Unbilled Stock"]
-
-    df["Rank"] = num(df.get("Top 500 SKU Rank", 9999), 9999)
-    df["Review"] = df.get("Review", "").astype(str).str.strip()
-    df["MOS"] = df.get("MOS-WH Available", "").astype(str).str.strip()
-
-    # -----------------------------------------------------
-    # AUTO PO ROW FUNCTION
-    # -----------------------------------------------------
-    def auto_po(row):
-
-        S7, S15, S30, S45, S60 = (
-            row["7 Days Sales"],
-            row["15 Days Sales"],
-            row["30 Days Sales"],
-            row["45 Days Sales"],
-            row["60 Days Sales"],
-        )
-
-        Box = row["Box Qty"]
-        Stock = row["TOTAL_STOCK"]
-        Review = row["Review"]
-        Rank = row["Rank"]
-        MOS = row["MOS"]
-
-        if MOS != "Yes" or Box <= 0:
-            return 0
-
-        IsTopHotcake = Review in ["Top-HotCake", "Top-Hotcake", "Hot Cake"]
-        IsPositive = Review == "Positive"
-        IsNewSKU = Review == "New SKU"
-        IsTop200 = Rank <= 200
-
-        DailyIncl7 = (
-            (S7 / 7) * w7 +
-            (S15 / 15) * w15 +
-            (S30 / 30) * w30 +
-            (S45 / 45) * w45 +
-            (S60 / 60) * w60
-        )
-
-        DailyExcl7 = (
-            (S15 / 15) * ew15 +
-            (S30 / 30) * ew30 +
-            (S45 / 45) * ew45 +
-            (S60 / 60) * ew60
-        )
-
-        FinalDaily = DailyExcl7 if (IsTop200 or IsTopHotcake or IsPositive) else DailyIncl7
-
-        if IsTop200 or IsTopHotcake:
-            PlanDays = 45
-        elif IsPositive or IsNewSKU:
-            PlanDays = 38
-        else:
-            PlanDays = 30
-
-        Target = FinalDaily * PlanDays
-        Shortage = max(Target - Stock, 0)
-
-        if Shortage <= 0:
-            return 0
-
-        Remainder = Shortage % Box
-        QtyRaw = (
-            np.ceil(Shortage / Box) * Box
-            if Remainder >= (0.8 * Box)
-            else np.floor(Shortage / Box) * Box
-        )
-
-        MaxStock = FinalDaily * 60
-        IsOverstock = Stock > MaxStock
-        ForceMinBox = Shortage > 0 and (IsTopHotcake or IsPositive or IsNewSKU or IsTop200)
-
-        FinalQty = Box if (IsOverstock and ForceMinBox) else QtyRaw
-        FinalQty = min(FinalQty, min(10 * Box, 120))
-
-        if S7 == S15 == S30 == S45 == S60 == 0:
-            return 0
-
-        return int(max(FinalQty, 0))
-
-    df["Manual Required Qty"] = df.apply(auto_po, axis=1)
-    return df
+df["Rank"] = num(df.get("Top 500 SKU Rank", 9999), 9999)
+df["Review"] = df.get("Review", "").astype(str).str.strip()
+df["MOS"] = df.get("MOS-WH Available", "").astype(str).str.strip()
 
 # ---------------------------------------------------------
-# PROCESS FILE
+# AUTO PO LOGIC (WEIGHTED + BUSINESS RULES)
 # ---------------------------------------------------------
-if uploaded_file:
+def calculate_po(row):
+    S7, S15, S30, S45, S60 = row[sales_cols]
+    stock = row["TOTAL_STOCK"]
+    box = row["Box Qty"]
+    review = row["Review"]
+    rank = row["Rank"]
+    mos = row["MOS"]
 
-    try:
-        df = pd.read_excel(uploaded_file)
-        st.success("✅ File uploaded successfully")
+    if mos != "Yes" or box <= 0:
+        return 0
 
-        result_df = calculate_po(df)
+    # Flags
+    is_hotcake = review in ["Top-HotCake", "Top-Hotcake", "Hot Cake"]
+    is_positive = review == "Positive"
+    is_new = review == "New SKU"
+    is_top200 = rank <= 200
 
-        st.success("✅ Purchase Order Calculated Successfully")
-        st.dataframe(result_df, use_container_width=True)
+    # Weighted Daily Sales
+    daily_incl7 = (
+        (S7 / 7)  * w7  +
+        (S15 / 15) * w15 +
+        (S30 / 30) * w30 +
+        (S45 / 45) * w45 +
+        (S60 / 60) * w60
+    )
 
-        # -------------------------------------------------
-        # EXCEL DOWNLOAD (STREAMLIT CLOUD SAFE)
-        # -------------------------------------------------
-        output = BytesIO()
-        result_df.to_excel(output, index=False, engine="openpyxl")
-        output.seek(0)
+    daily_excl7 = max(
+        S15 / 15 if S15 else 0,
+        S30 / 30 if S30 else 0,
+        S45 / 45 if S45 else 0,
+        S60 / 60 if S60 else 0
+    )
 
-        st.download_button(
-            label="📥 Download PO Excel",
-            data=output,
-            file_name="Smart_PO_Output.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+    final_daily = daily_excl7 if (is_top200 or is_hotcake or is_positive) else daily_incl7
 
-    except Exception as e:
-        st.error("❌ Error while processing file")
-        st.exception(e)
+    # Plan Days
+    if is_top200 or is_hotcake:
+        plan_days = 45
+    elif is_positive or is_new:
+        plan_days = 38
+    else:
+        plan_days = 30
 
-# =========================================================
-# END OF APP
-# =========================================================
+    target = final_daily * plan_days
+    shortage = max(target - stock, 0)
+
+    if shortage <= 0:
+        return 0
+
+    # Box rounding (80% rule)
+    remainder = shortage % box
+    qty_raw = (
+        np.ceil(shortage / box) * box
+        if remainder >= 0.8 * box
+        else np.floor(shortage / box) * box
+    )
+
+    max_stock = final_daily * 60
+    is_overstock = stock > max_stock
+    force_min_box = shortage > 0 and (is_hotcake or is_positive or is_new or is_top200)
+
+    final_qty = box if (is_overstock or qty_raw == 0) and force_min_box else qty_raw
+
+    limit_qty = min(10 * box, 120)
+    result = np.floor(min(final_qty, limit_qty) / box) * box
+
+    if S7 == S15 == S30 == S45 == S60 == 0:
+        return 0
+
+    return int(result)
+
+# ---------------------------------------------------------
+# APPLY LOGIC
+# ---------------------------------------------------------
+df["Manual Required Qty"] = df.apply(calculate_po, axis=1)
+
+st.success("✅ Purchase Order Calculated Successfully")
+
+# ---------------------------------------------------------
+# SHOW DATA
+# ---------------------------------------------------------
+st.dataframe(df, use_container_width=True)
+
+# ---------------------------------------------------------
+# EXCEL DOWNLOAD (STREAMLIT CLOUD SAFE)
+# ---------------------------------------------------------
+output = BytesIO()
+df.to_excel(output, index=False, engine="openpyxl")
+output.seek(0)
+
+st.download_button(
+    label="📥 Download PO Excel",
+    data=output,
+    file_name="Smart_PO_Output.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
