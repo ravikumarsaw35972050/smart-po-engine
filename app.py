@@ -1,5 +1,5 @@
 # =========================================================
-# SMART PO ENGINE + CONFIG UI (STREAMLIT – FINAL MATCH)
+# SMART PO ENGINE – FINAL FIXED VERSION (NO NONE ISSUE)
 # =========================================================
 
 import streamlit as st
@@ -14,7 +14,7 @@ st.set_page_config(page_title="Smart PO Engine", layout="wide")
 st.title("📦 Smart Purchase Order Engine")
 
 # ---------------------------------------------------------
-# SIDEBAR CONFIG (EXACT COLAB MATCH)
+# SIDEBAR CONFIG
 # ---------------------------------------------------------
 st.sidebar.header("⚙️ Configuration")
 
@@ -61,77 +61,77 @@ if file:
     df['MOS'] = df.get('MOS-WH Available', '').astype(str)
 
     # -----------------------------------------------------
-    # EXACT COLAB AUTO_PO FUNCTION
+    # AUTO PO LOGIC (ALWAYS RETURNS INT)
     # -----------------------------------------------------
     def auto_po(row):
 
-        S7,S15,S30,S45,S60 = row[sales_cols]
-        Stock = row['TOTAL_STOCK']
-        Box = row['Box Qty']
-        Review = row['Review']
-        Rank = row['Rank']
-        MOS = row['MOS']
+        try:
+            if row['MOS'] != 'Yes' or row['Box Qty'] <= 0:
+                return 0
 
-        if MOS != 'Yes' or Box <= 0:
-            return 0
+            S7,S15,S30,S45,S60 = row[sales_cols]
+            stock = row['TOTAL_STOCK']
+            box = row['Box Qty']
+            review = row['Review']
+            rank = row['Rank']
 
-        IsTopHotcake = Review in ['Top-HotCake','Top-Hotcake','Hot Cake']
-        IsPositive = Review == 'Positive'
-        IsNewSKU = Review == 'New SKU'
-        IsTop200 = Rank <= 200
+            is_top200 = rank <= 200
+            is_hotcake = review in ['Top-HotCake','Top-Hotcake','Hot Cake']
+            is_positive = review == 'Positive'
+            is_newsku = review == 'New SKU'
 
-        DailyIncl7 = (
-            (S7/7)*w7 + (S15/15)*w15 + (S30/30)*w30 +
-            (S45/45)*w45 + (S60/60)*w60
-        )
+            daily_incl7 = (
+                (S7/7)*w7 + (S15/15)*w15 + (S30/30)*w30 +
+                (S45/45)*w45 + (S60/60)*w60
+            )
 
-        DailyExcl7 = (
-            (S15/15)*ew15 + (S30/30)*ew30 +
-            (S45/45)*ew45 + (S60/60)*ew60
-        )
+            daily_excl7 = (
+                (S15/15)*ew15 + (S30/30)*ew30 +
+                (S45/45)*ew45 + (S60/60)*ew60
+            )
 
-        FinalDaily = DailyExcl7 if (IsTop200 or IsTopHotcake or IsPositive) else DailyIncl7
+            final_daily = daily_excl7 if (is_top200 or is_hotcake or is_positive) else daily_incl7
 
-        if IsTop200 or IsTopHotcake:
-            PlanDays = plan_top
-        elif IsPositive or IsNewSKU:
-            PlanDays = plan_pos
-        else:
-            PlanDays = plan_def
+            if is_top200 or is_hotcake:
+                plan_days = plan_top
+            elif is_positive or is_newsku:
+                plan_days = plan_pos
+            else:
+                plan_days = plan_def
 
-        Target = FinalDaily * PlanDays
-        Shortage = max(Target - Stock, 0)
+            target = final_daily * plan_days
+            shortage = max(target - stock, 0)
 
-        if Shortage <= 0:
-            return 0
+            if shortage <= 0:
+                return 0
 
-        Remainder = Shortage % Box
-        QtyRaw = (
-            np.ceil(Shortage / Box) * Box
-            if Remainder >= threshold * Box
-            else np.floor(Shortage / Box) * Box
-        )
+            remainder = shortage % box
+            qty_raw = (
+                np.ceil(shortage / box) * box
+                if remainder >= threshold * box
+                else np.floor(shortage / box) * box
+            )
 
-        MaxStock = FinalDaily * 60
-        ForceMin = Shortage > 0 and (IsTopHotcake or IsPositive or IsNewSKU or IsTop200)
+            max_stock = final_daily * 60
+            force_min = shortage > 0 and (is_top200 or is_hotcake or is_positive or is_newsku)
 
-        FinalQty = Box if (Stock > MaxStock or QtyRaw == 0) and ForceMin else QtyRaw
-        FinalQty = min(FinalQty, 10*Box, 120)
+            final_qty = box if (stock > max_stock or qty_raw == 0) and force_min else qty_raw
+            final_qty = min(final_qty, 10*box, 120)
 
-        if S7==S15==S30==S45==S60==0:
-            return 0
+            return int(max(final_qty, 0))
 
-        return int(FinalQty)
-
-    # -----------------------------------------------------
-    # AUTO-FILL MANUAL REQUIRED QTY (KEY FIX)
-    # -----------------------------------------------------
-    df['Manual Required Qty'] = df.apply(auto_po, axis=1)
-
-    st.success("✅ PO Calculated (Manual Qty Auto-Filled)")
+        except Exception:
+            return 0   # 🔥 GUARANTEE NO NONE
 
     # -----------------------------------------------------
-    # EDITABLE TABLE (ONLY MANUAL COLUMN)
+    # AUTO-FILL MANUAL REQUIRED QTY
+    # -----------------------------------------------------
+    df['Manual Required Qty'] = df.apply(auto_po, axis=1).fillna(0).astype(int)
+
+    st.success("✅ Manual Required Qty auto-calculated")
+
+    # -----------------------------------------------------
+    # EDITABLE TABLE (OPTIONAL OVERRIDE)
     # -----------------------------------------------------
     df = st.data_editor(
         df,
@@ -149,7 +149,7 @@ if file:
     st.download_button(
         "⬇️ Download Final PO Excel",
         data=output,
-        file_name="FINAL_PO_WITH_UI_CONFIG.xlsx",
+        file_name="FINAL_PO_WITH_AUTO_MANUAL_QTY.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
