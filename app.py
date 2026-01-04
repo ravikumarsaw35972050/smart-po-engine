@@ -48,12 +48,12 @@ if uploaded_file is not None:
         df = pd.read_excel(uploaded_file)
 
         # ----------------------------------------------------
-        # BASIC VALIDATION
+        # REQUIRED COLUMNS CHECK
         # ----------------------------------------------------
         required_cols = [
             "7 Days Sales", "15 Days Sales",
-            "30 Days Sales", "45 Days Sales", "60 Days Sales",
-            "Current Stock"
+            "30 Days Sales", "45 Days Sales",
+            "60 Days Sales", "Current Stock"
         ]
 
         for col in required_cols:
@@ -62,12 +62,12 @@ if uploaded_file is not None:
                 st.stop()
 
         # ----------------------------------------------------
-        # CLEAN NaN
+        # CLEAN DATA
         # ----------------------------------------------------
         df[required_cols] = df[required_cols].fillna(0)
 
         # ----------------------------------------------------
-        # WEIGHTED AVERAGE CALCULATION
+        # WEIGHTED AVERAGE SALES
         # ----------------------------------------------------
         df["Weighted Avg Sales"] = (
             df["7 Days Sales"]  * w7  +
@@ -78,7 +78,7 @@ if uploaded_file is not None:
         )
 
         # ----------------------------------------------------
-        # PURCHASE LOGIC
+        # SYSTEM SUGGESTED ORDER
         # ----------------------------------------------------
         df["Suggested Order Qty"] = np.maximum(
             np.round(df["Weighted Avg Sales"] * 30 - df["Current Stock"]),
@@ -86,33 +86,53 @@ if uploaded_file is not None:
         ).astype(int)
 
         # ----------------------------------------------------
-        # FINAL OUTPUT
+        # MANUAL REQUIRED QTY (USER INPUT)
         # ----------------------------------------------------
-        result_df = df.copy()
+        if "Manual Required Qty" not in df.columns:
+            df["Manual Required Qty"] = 0
 
+        # ----------------------------------------------------
+        # DISPLAY EDITABLE TABLE
+        # ----------------------------------------------------
         st.success("✅ Purchase Order Calculated Successfully")
-        st.dataframe(result_df, use_container_width=True)
+
+        editable_cols = ["Manual Required Qty"]
+
+        result_df = st.data_editor(
+            df,
+            use_container_width=True,
+            disabled=[c for c in df.columns if c not in editable_cols],
+            num_rows="fixed"
+        )
 
         # ----------------------------------------------------
-        # SANITIZE BEFORE EXPORT
+        # FINAL ORDER QTY (MANUAL OVERRIDE)
+        # ----------------------------------------------------
+        result_df["Final Order Qty"] = np.where(
+            result_df["Manual Required Qty"] > 0,
+            result_df["Manual Required Qty"],
+            result_df["Suggested Order Qty"]
+        ).astype(int)
+
+        # ----------------------------------------------------
+        # SANITIZE DATA BEFORE EXPORT
         # ----------------------------------------------------
         safe_df = result_df.copy()
-        safe_df = safe_df.fillna("")  # replace NaN/None with empty string
+        safe_df = safe_df.fillna("")
 
-        # Drop any binary/image-like columns
         for col in safe_df.columns:
             if safe_df[col].apply(lambda x: isinstance(x, (bytes, bytearray))).any():
                 safe_df.drop(columns=[col], inplace=True)
 
         # ----------------------------------------------------
-        # EXCEL DOWNLOAD
+        # EXCEL DOWNLOAD (STREAMLIT CLOUD SAFE)
         # ----------------------------------------------------
         output = BytesIO()
         safe_df.to_excel(output, index=False, engine="openpyxl")
         output.seek(0)
 
         st.download_button(
-            label="⬇️ Download PO Excel",
+            label="⬇️ Download Final PO Excel",
             data=output,
             file_name="Smart_PO_Output.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -120,8 +140,8 @@ if uploaded_file is not None:
 
     except Exception as e:
         st.error("❌ Error while processing file")
-        st.text(f"Error type: {type(e).__name__}")
-        st.text(f"Error message: {str(e)}")
+        st.text(f"Error Type: {type(e).__name__}")
+        st.text(f"Error Message: {str(e)}")
 
 else:
     st.info("👆 Please upload an Excel file to start")
